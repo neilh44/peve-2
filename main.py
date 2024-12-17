@@ -40,32 +40,83 @@ transcript_collector = TranscriptCollector()
 async def root():
     return FileResponse('static/index.html')  # Changed to serve index.html
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    conversation_state = ConversationState()
-    
+    logger.info("New WebSocket connection attempt...")
     try:
+        await websocket.accept()
+        logger.info("WebSocket connection accepted")
+        conversation_state = ConversationState()
+
+        # Send initial greeting
+        try:
+            await websocket.send_json({
+                "type": "response",
+                "text": "Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?",
+                "audio": tts.speak("Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?")
+            })
+        except Exception as e:
+            logger.error(f"Error sending initial greeting: {e}")
+            return
+
         while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            if message["type"] == "transcription":
-                transcription = message["text"]
-                response = await process_conversation(transcription, conversation_state)
+            try:
+                # Set a timeout for receiving messages
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                logger.info(f"Received data: {data}")
                 
-                # Get audio response
-                audio_data = tts.speak(response)
+                message = json.loads(data)
                 
+                if message["type"] == "transcription":
+                    transcription = message["text"]
+                    logger.info(f"Processing transcription: {transcription}")
+                    
+                    # Process with timeout
+                    response = await asyncio.wait_for(
+                        process_conversation(transcription, conversation_state),
+                        timeout=10.0
+                    )
+                    
+                    # Get audio response with timeout
+                    audio_data = await asyncio.wait_for(
+                        asyncio.to_thread(tts.speak, response),
+                        timeout=5.0
+                    )
+                    
+                    # Send response
+                    await websocket.send_json({
+                        "type": "response",
+                        "text": response,
+                        "audio": audio_data
+                    })
+                    logger.info("Response sent successfully")
+                
+            except asyncio.TimeoutError:
+                logger.warning("Operation timed out")
                 await websocket.send_json({
-                    "type": "response",
-                    "text": response,
-                    "audio": audio_data
+                    "type": "error",
+                    "text": "I apologize, but the response is taking longer than expected. Please try again."
                 })
+            except WebSocketDisconnect:
+                logger.info("Client disconnected normally")
+                break
+            except Exception as e:
+                logger.error(f"Error in message loop: {e}")
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "text": "I apologize, but there was an error processing your request."
+                    })
+                except:
+                    break
                 
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected during setup")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.close()
+        logger.error(f"WebSocket setup error: {e}")
+    finally:
+        logger.info("WebSocket connection terminated")
 
 class ConversationState:
     def __init__(self):
