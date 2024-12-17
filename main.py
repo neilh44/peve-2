@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Mount static files directory
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -44,90 +41,88 @@ ner_extractor = NERExtractor()
 calendar_api = GoogleCalendarScheduler(os.getenv("GOOGLE_CALENDAR_CREDENTIALS"))
 transcript_collector = TranscriptCollector()
 
-@app.get("/")
-async def root():
-    return FileResponse('static/index.html')  # Changed to serve index.html
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    logger.info("New WebSocket connection attempt...")
-    try:
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        logger.info("WebSocket connection accepted")
-        conversation_state = ConversationState()
+        self.active_connections.append(websocket)
+        logger.info("New client connected")
 
-        # Send initial greeting
-        try:
-            initial_response = {
-                "type": "response",
-                "text": "Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?",
-                "audio": None  # Initialize without audio first
-            }
-            
-            try:
-                initial_response["audio"] = tts.speak("Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?")
-            except Exception as audio_error:
-                logger.error(f"Error generating audio: {audio_error}")
-                # Continue without audio if there's an error
-            
-            await websocket.send_json(initial_response)
-            
-        except Exception as e:
-            logger.error(f"Error sending initial greeting: {e}")
-            return
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info("Client disconnected")
 
-        while True:
-            try:
-                data = await websocket.receive_text()
-                logger.info(f"Received data: {data}")
-                
-                message = json.loads(data)
-                
-                if message["type"] == "transcription":
-                    transcription = message["text"]
-                    logger.info(f"Processing transcription: {transcription}")
-                    
-                    response = await process_conversation(transcription, conversation_state)
-                    
-                    response_data = {
-                        "type": "response",
-                        "text": response,
-                        "audio": None
-                    }
-                    
-                    try:
-                        response_data["audio"] = tts.speak(response)
-                    except Exception as audio_error:
-                        logger.error(f"Error generating audio response: {audio_error}")
-                        # Continue without audio if there's an error
-                    
-                    await websocket.send_json(response_data)
-                    logger.info("Response sent successfully")
-                
-            except WebSocketDisconnect:
-                logger.info("Client disconnected normally")
-                break
-            except Exception as e:
-                logger.error(f"Error in message loop: {e}")
-                try:
-                    await websocket.send_json({
-                        "type": "error",
-                        "text": "I apologize, but there was an error processing your request."
-                    })
-                except:
-                    break
-                
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected during setup")
-    except Exception as e:
-        logger.error(f"WebSocket setup error: {e}")
-    finally:
-        logger.info("WebSocket connection terminated")
+manager = ConnectionManager()
+
 class ConversationState:
     def __init__(self):
         self.state = "greeting"
         self.patient_info = {}
         self.is_booking_appointment = False
+
+@app.get("/")
+async def root():
+    return {"status": "healthy", "message": "Medical Office Virtual Assistant API is running"}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    conversation_state = ConversationState()
+    
+    try:
+        while True:
+            try:
+                # Receive and parse the message
+                data = await websocket.receive_text()
+                logger.info(f"Received message: {data[:100]}...")  # Log first 100 chars
+                message = json.loads(data)
+                
+                if message["type"] == "transcription":
+                    transcription = message["text"]
+                    
+                    # Process the conversation
+                    response = await process_conversation(transcription, conversation_state)
+                    logger.info(f"Generated response: {response[:100]}...")  # Log first 100 chars
+                    
+                    try:
+                        # Get audio response
+                        audio_data = await tts.speak(response)
+                        
+                        # Convert audio data to base64 if it's bytes
+                        if isinstance(audio_data, bytes):
+                            audio_data = base64.b64encode(audio_data).decode('utf-8')
+                        
+                        # Send response
+                        await websocket.send_json({
+                            "type": "response",
+                            "text": response,
+                            "audio": audio_data
+                        })
+                        logger.info("Response sent successfully")
+                        
+                    except Exception as audio_error:
+                        logger.error(f"Audio processing error: {audio_error}")
+                        await websocket.send_json({
+                            "type": "response",
+                            "text": response,
+                            "error": "Audio generation failed"
+                        })
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid message format"
+                })
+                continue
+                
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        manager.disconnect(websocket)
 
 async def process_conversation(transcription: str, state: ConversationState) -> str:
     """Process conversation and return appropriate response."""
@@ -152,6 +147,42 @@ async def process_conversation(transcription: str, state: ConversationState) -> 
     except Exception as e:
         logger.error(f"Error processing conversation: {e}")
         return "I apologize, but I'm having trouble processing your request. Could you please try again?"
+
+def check_appointment_intent(text: str) -> bool:
+    """Check if text indicates appointment booking intent."""
+    appointment_keywords = [
+        "book", "schedule", "appointment", "see the doctor",
+        "make an appointment", "book a time", "schedule a visit"
+    ]
+    return any(keyword in text.lower() for keyword in appointment_keywords)
+
+async def handle_appointment_booking(text: str, state: ConversationState) -> str:
+    """Handle the appointment booking process."""
+    if state.state == "collecting_name":
+        state.patient_info['name'] = text
+        state.state = "collecting_contact"
+        return "Thank you. Can I have your contact number, please?"
+    
+    elif state.state == "collecting_contact":
+        state.patient_info['contact'] = text
+        state.state = "understanding_needs"
+        return "What is the reason for your visit?"
+    
+    elif state.state == "understanding_needs":
+        state.patient_info['reason'] = text
+        state.state = "checking_availability"
+        return "When would you prefer to schedule your appointment?"
+    
+    elif state.state == "checking_availability":
+        try:
+            state.is_booking_appointment = False
+            state.state = "listening"
+            return f"Great! I've noted your preferred time. We'll verify availability and contact you to confirm the appointment. Is there anything else I can help you with?"
+        except Exception as e:
+            logger.error(f"Appointment booking error: {e}")
+            return "I apologize, but I'm having trouble scheduling the appointment. Could you please try again or call our office directly?"
+    
+    return "I apologize, but I'm having trouble with your request. Could you please repeat that?"
 
 if __name__ == "__main__":
     import uvicorn
