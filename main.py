@@ -65,8 +65,8 @@ class ConversationState:
 
 @app.get("/")
 async def root():
-    return {"status": "healthy", "message": "Medical Office Virtual Assistant API is running"}
-
+    return FileResponse("index.html")
+    
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
