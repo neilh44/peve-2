@@ -1,3 +1,4 @@
+utils
 spacy==3.7.4
 python-dotenv
 google-auth==2.27.0
