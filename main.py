@@ -1,5 +1,7 @@
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # Add this import
+from fastapi.responses import FileResponse    # Add this import
 import json
 import os
 from api.utils.language_processor import LanguageModelProcessor
@@ -14,6 +16,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Add CORS middleware
 app.add_middleware(
@@ -33,7 +38,7 @@ transcript_collector = TranscriptCollector()
 
 @app.get("/")
 async def root():
-    return {"status": "healthy", "message": "Medical Office Virtual Assistant API is running"}
+    return FileResponse('static/index.html')  # Changed to serve index.html
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
