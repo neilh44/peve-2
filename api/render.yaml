@@ -1,20 +1,7 @@
 services:
   - type: web
-    name: medical-office-assistant
-    env: docker
-    region: ohio  # or your preferred region
-    plan: starter # or free
-    healthCheckPath: /
-    envVars:
-      - key: PORT
-        value: 10000
-      - key: DEEPGRAM_API_KEY
-        sync: false
-      - key: GOOGLE_CALENDAR_CREDENTIALS
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
+    name: peve
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    staticPublishPath: ./static

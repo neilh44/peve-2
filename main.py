@@ -95,4 +95,8 @@ async def process_conversation(transcription: str, state: ConversationState) -> 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 10000))
+<<<<<<< HEAD
     uvicorn.run(app, host="0.0.0.0", port=port)
+=======
+    uvicorn.run(app, host="0.0.0.0", port=port)
+>>>>>>> local-backup
