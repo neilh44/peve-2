@@ -2,11 +2,11 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
-from utils.language_processor import LanguageModelProcessor
-from utils.text_to_speech import TextToSpeech
-from utils.transcript_collector import TranscriptCollector
-from utils.ner_extractor import NERExtractor
-from utils.calendar_manager import GoogleCalendarScheduler
+from api.utils.language_processor import LanguageModelProcessor
+from api.utils.text_to_speech import TextToSpeech
+from api.utils.transcript_collector import TranscriptCollector
+from api.utils.ner_extractor import NERExtractor
+from api.utils.calendar_manager import GoogleCalendarScheduler
 import logging
 
 # Initialize logging
