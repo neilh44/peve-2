@@ -1,15 +1,23 @@
-from fastapi import FastAPI, WebSocket, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # Add this import
-from fastapi.responses import FileResponse    # Add this import
+# Standard library imports
+import asyncio
 import json
 import os
+import logging
+
+# FastAPI and Starlette imports
+from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from starlette.websockets import WebSocketDisconnect
+
+# Application imports
 from api.utils.language_processor import LanguageModelProcessor
 from api.utils.text_to_speech import TextToSpeech
 from api.utils.transcript_collector import TranscriptCollector
 from api.utils.ner_extractor import NERExtractor
 from api.utils.calendar_manager import GoogleCalendarScheduler
-import logging
+
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +48,6 @@ transcript_collector = TranscriptCollector()
 async def root():
     return FileResponse('static/index.html')  # Changed to serve index.html
 
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     logger.info("New WebSocket connection attempt...")
@@ -51,19 +58,27 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Send initial greeting
         try:
-            await websocket.send_json({
+            initial_response = {
                 "type": "response",
                 "text": "Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?",
-                "audio": tts.speak("Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?")
-            })
+                "audio": None  # Initialize without audio first
+            }
+            
+            try:
+                initial_response["audio"] = tts.speak("Good morning! Thank you for calling Dr. Smith's office. How can I assist you today?")
+            except Exception as audio_error:
+                logger.error(f"Error generating audio: {audio_error}")
+                # Continue without audio if there's an error
+            
+            await websocket.send_json(initial_response)
+            
         except Exception as e:
             logger.error(f"Error sending initial greeting: {e}")
             return
 
         while True:
             try:
-                # Set a timeout for receiving messages
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                data = await websocket.receive_text()
                 logger.info(f"Received data: {data}")
                 
                 message = json.loads(data)
@@ -72,32 +87,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     transcription = message["text"]
                     logger.info(f"Processing transcription: {transcription}")
                     
-                    # Process with timeout
-                    response = await asyncio.wait_for(
-                        process_conversation(transcription, conversation_state),
-                        timeout=10.0
-                    )
+                    response = await process_conversation(transcription, conversation_state)
                     
-                    # Get audio response with timeout
-                    audio_data = await asyncio.wait_for(
-                        asyncio.to_thread(tts.speak, response),
-                        timeout=5.0
-                    )
-                    
-                    # Send response
-                    await websocket.send_json({
+                    response_data = {
                         "type": "response",
                         "text": response,
-                        "audio": audio_data
-                    })
+                        "audio": None
+                    }
+                    
+                    try:
+                        response_data["audio"] = tts.speak(response)
+                    except Exception as audio_error:
+                        logger.error(f"Error generating audio response: {audio_error}")
+                        # Continue without audio if there's an error
+                    
+                    await websocket.send_json(response_data)
                     logger.info("Response sent successfully")
                 
-            except asyncio.TimeoutError:
-                logger.warning("Operation timed out")
-                await websocket.send_json({
-                    "type": "error",
-                    "text": "I apologize, but the response is taking longer than expected. Please try again."
-                })
             except WebSocketDisconnect:
                 logger.info("Client disconnected normally")
                 break
@@ -117,7 +123,6 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket setup error: {e}")
     finally:
         logger.info("WebSocket connection terminated")
-
 class ConversationState:
     def __init__(self):
         self.state = "greeting"
