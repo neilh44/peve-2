@@ -77,7 +77,7 @@
     </div>
     <div id="status">Not connected</div>
 
-    <script> 
+    <script>
         let ws;
         let recognition = null;
         let isConnected = false;
@@ -87,48 +87,81 @@
         let processingResponse = false;
         let audioContext = null;
         let hasSetup = false;
-        let isAssistantSpeaking = false;
-        
+
         // Initialize WebSocket connection
         function connectWebSocket() {
-            const ws = new WebSocket('wss://peve.onrender.com/ws');
+            console.log('Attempting to connect WebSocket...');
+            // Updated WebSocket URL to match your server
+            ws = new WebSocket('ws://peve.onrender.com/ws');
             
             ws.onopen = () => {
+                console.log('WebSocket connection established successfully');
                 isConnected = true;
                 updateStatus('Connected');
                 document.getElementById('speakButton').disabled = false;
             };
-        
+
             ws.onclose = () => {
+                console.log('WebSocket connection closed');
                 isConnected = false;
                 updateStatus('Disconnected. Reconnecting...');
                 document.getElementById('speakButton').disabled = true;
                 setTimeout(connectWebSocket, 3000);
             };
-        
+
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
                 updateStatus('Connection error');
             };
-        
+
             ws.onmessage = async (event) => {
+                console.log('Received message from server:', event.data);
                 try {
                     const response = JSON.parse(event.data);
                     if (response.type === 'response') {
+                        console.log('Processing response:', response);
                         addMessage(`Assistant: ${response.text}`, 'assistant');
                         
-                        // Play audio if available
+                        // Handle audio playback
                         if (response.audio) {
                             try {
-                                await playAudio(response.audio);
+                                // Convert base64 to array buffer
+                                const binaryString = atob(response.audio);
+                                const len = binaryString.length;
+                                const bytes = new Uint8Array(len);
+                                for (let i = 0; i < len; i++) {
+                                    bytes[i] = binaryString.charCodeAt(i);
+                                }
+                                
+                                console.log('Creating audio blob...');
+                                const audioBlob = new Blob([bytes.buffer], { type: 'audio/wav' });
+                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const audio = new Audio(audioUrl);
+                                
+                                // Play audio and clean up
+                                await audio.play();
+                                console.log('Audio playback started');
+                                
+                                audio.onended = () => {
+                                    console.log('Audio playback ended');
+                                    URL.revokeObjectURL(audioUrl);
+                                    processingResponse = false;
+                                    if (!conversationPaused) {
+                                        resumeListening();
+                                    }
+                                };
                             } catch (audioError) {
                                 console.error('Error playing audio:', audioError);
+                                processingResponse = false;
+                                if (!conversationPaused) {
+                                    resumeListening();
+                                }
                             }
-                        }
-                        
-                        processingResponse = false;
-                        if (!conversationPaused) {
-                            await resumeListening();
+                        } else {
+                            processingResponse = false;
+                            if (!conversationPaused) {
+                                resumeListening();
+                            }
                         }
                     }
                 } catch (error) {
@@ -137,11 +170,12 @@
                 }
             };
         }
-        
+
+
         // Combined setup function for audio context and recognition
         async function setupAudio() {
             if (hasSetup) return true;
-        
+
             try {
                 // Create audio context
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -149,20 +183,20 @@
                 // Get microphone stream once
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 microphoneStream = stream;
-        
+
                 // Setup recognition with the existing stream
                 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new window.SpeechRecognition();
                 
                 // Modified recognition settings
-                recognition.continuous = true;
+                recognition.continuous = true;  // Changed to true
                 recognition.interimResults = false;
                 recognition.lang = 'en-US';
                 
                 recognition.onresult = (event) => {
                     const transcript = event.results[event.results.length - 1][0].transcript;
                     addMessage(`You: ${transcript}`, 'user');
-                    if (ws && ws.readyState === WebSocket.OPEN && !isAssistantSpeaking) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
                         processingResponse = true;
                         ws.send(JSON.stringify({
                             type: 'transcription',
@@ -170,14 +204,14 @@
                         }));
                     }
                 };
-        
+
                 recognition.onend = async () => {
                     isListening = false;
-                    if (!conversationPaused && !processingResponse && !isAssistantSpeaking) {
+                    if (!conversationPaused && !processingResponse) {
                         await resumeListening();
                     }
                 };
-        
+
                 recognition.onerror = async (event) => {
                     console.error('Recognition error:', event.error);
                     isListening = false;
@@ -189,11 +223,11 @@
                         return;
                     }
                     
-                    if (event.error !== 'no-speech' && !conversationPaused && !processingResponse && !isAssistantSpeaking) {
+                    if (event.error !== 'no-speech' && !conversationPaused && !processingResponse) {
                         await resumeListening();
                     }
                 };
-        
+
                 hasSetup = true;
                 return true;
             } catch (error) {
@@ -202,9 +236,9 @@
                 return false;
             }
         }
-        
+
         async function resumeListening() {
-            if (!isListening && !conversationPaused && !processingResponse && !isAssistantSpeaking) {
+            if (!isListening && !conversationPaused && !processingResponse) {
                 try {
                     await recognition.start();
                     isListening = true;
@@ -220,51 +254,7 @@
                 }
             }
         }
-        
-        async function playAudio(base64Audio) {
-            try {
-                isAssistantSpeaking = true;
-                updateStatus('Assistant speaking...');
-                
-                const audioData = atob(base64Audio);
-                const arrayBuffer = new ArrayBuffer(audioData.length);
-                const view = new Uint8Array(arrayBuffer);
-                for (let i = 0; i < audioData.length; i++) {
-                    view[i] = audioData.charCodeAt(i);
-                }
-                const audioBlob = new Blob([arrayBuffer], { type: 'audio/wav' });
-                const audioUrl = URL.createObjectURL(audioBlob);
-                
-                return new Promise((resolve, reject) => {
-                    const audio = new Audio(audioUrl);
-                    
-                    audio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        isAssistantSpeaking = false;
-                        updateStatus('Listening...');
-                        resolve();
-                    };
-                    
-                    audio.onerror = (error) => {
-                        URL.revokeObjectURL(audioUrl);
-                        isAssistantSpeaking = false;
-                        updateStatus('Error playing audio');
-                        reject(error);
-                    };
-                    
-                    audio.play().catch(error => {
-                        isAssistantSpeaking = false;
-                        updateStatus('Error playing audio');
-                        reject(error);
-                    });
-                });
-            } catch (error) {
-                isAssistantSpeaking = false;
-                updateStatus('Error processing audio');
-                throw error;
-            }
-        }
-        
+
         function stopAllAudio() {
             if (recognition) {
                 recognition.stop();
@@ -279,9 +269,8 @@
             audioContext = null;
             recognition = null;
             hasSetup = false;
-            isAssistantSpeaking = false;
         }
-        
+
         // Toggle conversation state
         async function toggleConversation() {
             if (!hasSetup) {
@@ -291,7 +280,7 @@
                     return;
                 }
             }
-        
+
             conversationPaused = !conversationPaused;
             processingResponse = false;
             const button = document.getElementById('speakButton');
@@ -309,7 +298,7 @@
                 await resumeListening();
             }
         }
-        
+
         // Helper functions
         function addMessage(message, type) {
             const chatContainer = document.getElementById('chat-container');
@@ -319,24 +308,24 @@
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
-        
+
         function updateStatus(status) {
             document.getElementById('status').textContent = status;
         }
-        
+
         // Initialize the application
         window.onload = () => {
             document.getElementById('speakButton').disabled = true;
             connectWebSocket();
         };
-        
+
         // Cleanup on page unload
         window.onunload = () => {
             stopAllAudio();
             if (ws) {
                 ws.close();
             }
-        };        
+        };
     </script>
 </body>
 </html>
