@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chat Application</title>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        #chat-container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            height: 400px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .user {
+            background-color: #e3f2fd;
+            margin-left: 20%;
+        }
+
+        .assistant {
+            background-color: #f5f5f5;
+            margin-right: 20%;
+        }
+
+        #controls {
+            text-align: center;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: #2196f3;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1976d2;
+        }
+
+        button.speaking {
+            background-color: #f44336;
+        }
+
+        #status {
+            text-align: center;
+            margin-top: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container"></div>
+    <div id="controls">
+        <button id="speakButton" onclick="toggleConversation()">Start Conversation</button>
+    </div>
+    <div id="status">Not connected</div>
+
+    <script>
+        let ws;
+        let recognition = null;
+        let isConnected = false;
+        let isListening = false;
+        let conversationPaused = true;  // Start paused
+        let microphoneStream = null;
+        let processingResponse = false;
+        let audioContext = null;
+        let hasSetup = false;
+
+        // Initialize WebSocket connection
+        function connectWebSocket() {
+            const ws = new WebSocket('wss://peve.onrender.com/ws');
+            
+            ws.onopen = () => {
+                isConnected = true;
+                updateStatus('Connected');
+                document.getElementById('speakButton').disabled = false;
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                updateStatus('Disconnected. Reconnecting...');
+                document.getElementById('speakButton').disabled = true;
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Connection error');
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const response = JSON.parse(event.data);
+                    if (response.type === 'response') {
+                        addMessage(`Assistant: ${response.text}`, 'assistant');
+                        processingResponse = false;
+                        if (!conversationPaused) {
+                            await resumeListening();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                    processingResponse = false;
+                }
+            };
+        }
+
+        // Combined setup function for audio context and recognition
+        async function setupAudio() {
+            if (hasSetup) return true;
+
+            try {
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Get microphone stream once
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                microphoneStream = stream;
+
+                // Setup recognition with the existing stream
+                window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new window.SpeechRecognition();
+                
+                // Modified recognition settings
+                recognition.continuous = true;  // Changed to true
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.onresult = (event) => {
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    addMessage(`You: ${transcript}`, 'user');
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        processingResponse = true;
+                        ws.send(JSON.stringify({
+                            type: 'transcription',
+                            text: transcript
+                        }));
+                    }
+                };
+
+                recognition.onend = async () => {
+                    isListening = false;
+                    if (!conversationPaused && !processingResponse) {
+                        await resumeListening();
+                    }
+                };
+
+                recognition.onerror = async (event) => {
+                    console.error('Recognition error:', event.error);
+                    isListening = false;
+                    
+                    if (event.error === 'not-allowed') {
+                        hasSetup = false;
+                        stopAllAudio();
+                        alert('Microphone permission was denied. Please enable microphone access and try again.');
+                        return;
+                    }
+                    
+                    if (event.error !== 'no-speech' && !conversationPaused && !processingResponse) {
+                        await resumeListening();
+                    }
+                };
+
+                hasSetup = true;
+                return true;
+            } catch (error) {
+                console.error('Setup error:', error);
+                hasSetup = false;
+                return false;
+            }
+        }
+
+        async function resumeListening() {
+            if (!isListening && !conversationPaused && !processingResponse) {
+                try {
+                    await recognition.start();
+                    isListening = true;
+                    updateStatus('Listening...');
+                } catch (err) {
+                    if (err.name === 'InvalidStateError') {
+                        // Recognition is already started, ignore this error
+                        isListening = true;
+                    } else {
+                        console.error('Error resuming recognition:', err);
+                        updateStatus('Error starting recognition');
+                    }
+                }
+            }
+        }
+
+        function stopAllAudio() {
+            if (recognition) {
+                recognition.stop();
+            }
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            microphoneStream = null;
+            audioContext = null;
+            recognition = null;
+            hasSetup = false;
+        }
+
+        // Toggle conversation state
+        async function toggleConversation() {
+            if (!hasSetup) {
+                const setupSuccess = await setupAudio();
+                if (!setupSuccess) {
+                    alert('Could not set up audio. Please ensure microphone permissions are granted.');
+                    return;
+                }
+            }
+
+            conversationPaused = !conversationPaused;
+            processingResponse = false;
+            const button = document.getElementById('speakButton');
+            
+            if (conversationPaused) {
+                button.textContent = 'Resume Conversation';
+                button.classList.add('speaking');
+                updateStatus('Paused');
+                if (recognition) {
+                    recognition.stop();
+                }
+            } else {
+                button.textContent = 'Pause Conversation';
+                button.classList.remove('speaking');
+                await resumeListening();
+            }
+        }
+
+        // Helper functions
+        function addMessage(message, type) {
+            const chatContainer = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = message;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function updateStatus(status) {
+            document.getElementById('status').textContent = status;
+        }
+
+        // Initialize the application
+        window.onload = () => {
+            document.getElementById('speakButton').disabled = true;
+            connectWebSocket();
+        };
+
+        // Cleanup on page unload
+        window.onunload = () => {
+            stopAllAudio();
+            if (ws) {
+                ws.close();
+            }
+        };
+    </script>
+</body>
+</html>
