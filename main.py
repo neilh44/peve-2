@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import logging
+import base64
 
 # FastAPI and Starlette imports
 from fastapi import FastAPI, WebSocket, HTTPException
