@@ -92,7 +92,7 @@
         function connectWebSocket() {
             console.log('Attempting to connect WebSocket...');
             // Updated WebSocket URL to match your server
-            ws = new WebSocket('wss://peve.onrender.com/ws');            
+            ws = new WebSocket('ws://peve.onrender.com/ws');            
             ws.onopen = () => {
                 console.log('WebSocket connection established successfully');
                 isConnected = true;
