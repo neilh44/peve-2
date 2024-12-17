@@ -1,4 +1,6 @@
 from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import asyncio
@@ -40,7 +42,7 @@ class ConversationState:
 
 @app.get("/")
 async def root():
-    return {"message": "Medical Office Virtual Assistant API"}
+    return FileResponse('static/index.html')
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
