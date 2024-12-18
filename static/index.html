@@ -3,79 +3,170 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Chat Application</title>
+    <title>MedSchedule AI Assistant</title>
     <style>
-        /* Previous styles remain the same */
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Inter', sans-serif;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: #f8fafc;
         }
-
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        .title {
+            color: #1e40af;
+            margin: 0;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #64748b;
+            margin: 10px 0 0;
+            font-size: 16px;
+        }
+        .main-container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+        .sidebar {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        .quick-actions {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .quick-actions li {
+            margin-bottom: 10px;
+        }
+        .quick-actions button {
+            width: 100%;
+            padding: 12px;
+            text-align: left;
+            background-color: #f1f5f9;
+            border: none;
+            border-radius: 6px;
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .quick-actions button:hover {
+            background-color: #e2e8f0;
+        }
         #chat-container {
             background-color: white;
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-            height: 400px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            height: 500px;
             overflow-y: auto;
+            display: flex;
+            flex-direction: column;
         }
-
         .message {
             margin: 10px 0;
-            padding: 10px;
-            border-radius: 4px;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 80%;
         }
-
         .user {
-            background-color: #e3f2fd;
-            margin-left: 20%;
+            background-color: #e0e7ff;
+            margin-left: auto;
+            color: #1e40af;
         }
-
         .assistant {
-            background-color: #f5f5f5;
-            margin-right: 20%;
+            background-color: #f1f5f9;
+            margin-right: auto;
+            color: #334155;
         }
-
-        #controls {
+        .controls-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-top: 20px;
             text-align: center;
         }
-
-        button {
+        #speakButton {
             padding: 12px 24px;
             font-size: 16px;
             border: none;
-            border-radius: 4px;
-            background-color: #2196f3;
+            border-radius: 8px;
+            background-color: #2563eb;
             color: white;
             cursor: pointer;
-            transition: background-color 0.3s;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
         }
-
-        button:hover {
-            background-color: #1976d2;
+        #speakButton:hover {
+            background-color: #1d4ed8;
         }
-
-        button.speaking {
-            background-color: #f44336;
+        #speakButton.speaking {
+            background-color: #dc2626;
         }
-
         #status {
-            text-align: center;
             margin-top: 10px;
-            color: #666;
+            color: #64748b;
+            font-size: 14px;
+        }
+        .appointment-details {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8fafc;
+            border-radius: 8px;
+            display: none;
+        }
+        .appointment-details.active {
+            display: block;
         }
     </style>
 </head>
 <body>
-    <div id="chat-container"></div>
-    <div id="controls">
-        <button id="speakButton" onclick="toggleConversation()">Start Conversation</button>
+    <div class="header">
+        <h1 class="title">MedSchedule AI Assistant</h1>
+        <p class="subtitle">Voice-Enabled Appointment Scheduling System</p>
     </div>
-    <div id="status">Not connected</div>
+    
+    <div class="main-container">
+        <div class="sidebar">
+            <h3>Quick Actions</h3>
+            <ul class="quick-actions">
+                <li><button onclick="suggestPrompt('Schedule a new appointment')">Schedule Appointment</button></li>
+                <li><button onclick="suggestPrompt('Check available time slots')">Check Availability</button></li>
+                <li><button onclick="suggestPrompt('Reschedule my appointment')">Reschedule Appointment</button></li>
+                <li><button onclick="suggestPrompt('Cancel my appointment')">Cancel Appointment</button></li>
+                <li><button onclick="suggestPrompt('Get appointment reminder')">Set Reminder</button></li>
+            </ul>
+            
+            <div class="appointment-details" id="appointmentDetails">
+                <!-- Dynamically filled when appointment is being scheduled -->
+            </div>
+        </div>
+        
+        <div class="chat-section">
+            <div id="chat-container"></div>
+            
+            <div class="controls-container">
+                <button id="speakButton" onclick="toggleConversation()">
+                    Start Voice Assistant
+                </button>
+                <div id="status">Not connected</div>
+            </div>
+        </div>
+    </div>
 
     <script>
         let ws;
